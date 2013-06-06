@@ -43,7 +43,7 @@ def update_by_name_and_by_size(path):
         for name in files:
             full = join(root, name)
             try: size = getsize(full)
-            except: continue    # XXX danger!
+            except: continue
             name = name.lower()
             bev = by_ext[os.path.splitext(name)[1]]
 
@@ -76,7 +76,7 @@ def update_by_name_and_by_size(path):
 
 def update_by_partial_hash(bev, full, out=''):
     try: hash = hashlib.md5(open(full, 'rb').read(512)).hexdigest()
-    except: return      # XXX danger!
+    except: return
     bph = bev['by_partial_hash'].setdefault(hash, full)
     if bph is not full:
         if type(bph) is unicode:
@@ -89,8 +89,12 @@ def update_by_partial_hash(bev, full, out=''):
 
 
 def update_by_hash(bev, full, out=''):
-    try: hash = hashlib.md5(open(full, 'rb').read()).hexdigest()
-    except: return      # XXX danger!
+    try: input = open(full, 'rb', 64 * 1024)
+    except: return
+    md5 = hashlib.md5()
+    map(md5.update, input)
+    hash = md5.hexdigest()
+
     bh = bev['by_hash'].setdefault(hash, full)
     if bh is not full:
         if type(bh) is unicode:
