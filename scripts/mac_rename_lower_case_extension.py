@@ -24,21 +24,23 @@ def main(args):
     # quick arg parsing
     p = argparse.ArgumentParser(description='look for duplicate files')
     p.add_argument('-0', dest='nul_separator', action='store_true', help='use NUL (\'\\0\') char as separator, a la xargs')
+    p.add_argument('-f', '--file-rename', dest='file_rename', action='store_true', help='rename file name to lower-case, not just extension')
     p.add_argument('-n', '--dry-run', dest='dry_run', action='store_true', help='dry run: do not perform actual moves')
     p.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='verbose mode')
     args = p.parse_args(args[1:])
 
     def rename(src):
-        bits = os.path.splitext(src)
-        dst = bits[0] + bits[1].lower()
+        dir, file = os.path.split(src)
+        base, ext = os.path.splitext(file)
+        dst = os.path.join(dir, (args.file_rename and base.lower() or base) + ext.lower())
         if src != dst:
-            tmp = bits[0] + '-LOWER_CASE_HOLDER' + bits[1].lower()
+            tmp = os.path.join(dir, (args.file_rename and base.lower() or base) + '-LOWER_CASE_TMP' + ext.lower())
             if args.verbose:
-                print '{0} -> {1}'.format(src, tmp)
+                sys.stdout.write('{0} -> {1}'.format(src, tmp))
             if not args.dry_run:
                 os.rename(src, tmp)
             if args.verbose:
-                print '{0} -> {1}'.format(tmp, dst)
+                sys.stdout.write(' -> {0}\n'.format(dst))
             if not args.dry_run:
                 os.rename(tmp, dst)
 

@@ -20,12 +20,16 @@
 
 import argparse
 import collections
+import fnmatch
 import hashlib
 import json
+#import logging
 import os
 import pipes    # for pipes.quote, shell escaping: http://stackoverflow.com/questions/35817/how-to-escape-os-system-calls-in-python
+import re
 import sys
 
+#from logging import debug, info, warning, error
 from os.path import getsize, join, splitext
 
 # each key is as named, and each entry is a string or a set of 'full paths',
@@ -36,12 +40,34 @@ from os.path import getsize, join, splitext
 by_ext = collections.defaultdict(lambda:
     { 'by_name': {}, 'by_size': {}, 'by_partial_hash': {}, 'by_hash': {}, },)
 
-def update_by_name_and_by_size(path):
+def update_by_name_and_by_size(path, exclude, include):
     for root, dirs, files in os.walk(unicode(path)):
+        if exclude:
+            # filter excluded dirs
+            to_del = []
+            for i, d in enumerate(dirs):
+                if exclude.match(join(root, d)):
+                    to_del.append(i)
+            for i in reversed(to_del):
+                del dirs[i]
+
+        if exclude:
+            # filter non-included dirs
+            to_del = []
+            for i, d in enumerate(dirs):
+                if not include.match(join(root, d)):
+                    to_del.append(i)
+            for i in reversed(to_del):
+                del dirs[i]
+
         sys.stdout.write(root + u' ')
-        out = ''
         for name in files:
+            # skip if excluded file, then get name/size/ext
             full = join(root, name)
+            if exclude and exclude.match(full):
+                continue
+            if include and not include.match(full):
+                continue
             try: size = getsize(full)
             except: continue
             name = name.lower()
@@ -50,7 +76,6 @@ def update_by_name_and_by_size(path):
             # update by_name
             bnv = bev['by_name'].setdefault(name, full)
             if bnv is not full:
-                out = 'n'
                 if type(bnv) is unicode:
                     bev['by_name'][name] = set((bnv, full))
                 if type(bnv) is set:
@@ -59,56 +84,62 @@ def update_by_name_and_by_size(path):
             # update bev['by_size']
             bsv = bev['by_size'].setdefault(size, full)
             if bsv is not full:
-                if size > 0:
-                    out += 's'
                 if type(bsv) is unicode:
                     bev['by_size'][size] = set((bsv, full))
                     update_by_partial_hash(bev, bsv)
                 if type(bsv) is set:
                     bsv.add(full)
-                out = update_by_partial_hash(bev, full, out)
-
-            if out:
-                sys.stdout.write(out)
+                update_by_partial_hash(bev, full)
         print
-    print
 
 
-def update_by_partial_hash(bev, full, out=''):
+def update_by_partial_hash(bev, full):
     try: hash = hashlib.md5(open(full, 'rb').read(512)).hexdigest()
     except: return
-    bph = bev['by_partial_hash'].setdefault(hash, full)
-    if bph is not full:
-        if type(bph) is unicode:
-            bev['by_partial_hash'][hash] = set((bph, full))
-            update_by_hash(bev, bph)
-        if type(bph) is set:
-            bph.add(full)
-        out = update_by_hash(bev, full, out)
-    return out
+    bphv = bev['by_partial_hash'].setdefault(hash, full)
+    if bphv is not full:
+        if type(bphv) is unicode:
+            bev['by_partial_hash'][hash] = set((bphv, full))
+            update_by_hash(bev, bphv)
+        if type(bphv) is set:
+            bphv.add(full)
+        update_by_hash(bev, full)
 
 
-def update_by_hash(bev, full, out=''):
+def update_by_hash(bev, full):
     try: input = open(full, 'rb', 64 * 1024)
     except: return
     md5 = hashlib.md5()
     map(md5.update, input)
     hash = md5.hexdigest()
 
-    bh = bev['by_hash'].setdefault(hash, full)
-    if bh is not full:
-        if type(bh) is unicode:
-            bev['by_hash'][hash] = set((bh, full))
-        if type(bh) is set:
-            bh.add(full)
-        out = out[0:-1] + 'H'
-    return out
+    bhv = bev['by_hash'].setdefault(hash, full)
+    if bhv is not full:
+        if type(bhv) is unicode:
+            bev['by_hash'][hash] = set((bhv, full))
+        if type(bhv) is set:
+            bhv.add(full)
 
 
 # -----------------------------------------------------------------------------
 
 def main(args):
-    update_by_name_and_by_size('.')
+    # quick arg parsing
+    p = argparse.ArgumentParser(description='look for duplicate files')
+    p.add_argument('--exclude', action='append', help='exclude glob pattern')
+    p.add_argument('--include', action='append', help='include glob pattern')
+    #p.add_argument('-v', '--verbose', dest='verbose', default=0, action='count', help='verbose mode')
+    p.add_argument('path', nargs='+', help='paths to search')
+    args = p.parse_args(args[1:])
+
+    # convert set of globs into a singular RE
+    exclude = None if not args.exclude else re.compile('(?:{0})'.format(
+        ')|(?:'.join([fnmatch.translate(ex) for ex in args.exclude])))
+    include = None if not args.include else re.compile('(?:{0})'.format(
+        ')|(?:'.join([fnmatch.translate(ex) for ex in args.include])))
+
+    for path in args.path:
+        update_by_name_and_by_size(path, exclude, include)
 
     # save raw map as json to .duplicates.json
     class JsonSetEncoder(json.JSONEncoder):
